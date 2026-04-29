@@ -2,14 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   ChefHat,
-  Bike,
-  PackageCheck,
-  Flame,
-  UtensilsCrossed,
   Clock,
-  Check,
-  ArrowLeft,
-  Rocket,
+  UtensilsCrossed,
+  Plus,
+  Trash2,
+  Bike,
+  Flame,
+  PackageCheck,
+  ShoppingBag,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,9 @@ import paneer from "@/assets/paneer.jpg";
 import friedrice from "@/assets/friedrice.jpg";
 import pizza from "@/assets/pizza.jpg";
 import burger from "@/assets/burger.jpg";
+import orangeJuice from "@/assets/orange-juice.jpg";
+import watermelonJuice from "@/assets/watermelon-juice.jpg";
+import mangoJuice from "@/assets/mango-juice.jpg";
 
 export const Route = createFileRoute("/")({
   component: Index,
@@ -29,23 +32,36 @@ export const Route = createFileRoute("/")({
 
 const TRAVEL_MIN = 15;
 
+type Category = "Meals" | "Juices";
+
 type FoodItem = {
   id: string;
   name: string;
-  desc: string;
   image: string;
-  defaultPrep: number;
-  tag: string;
+  price: number; // INR
+  prep: number; // minutes
+  category: Category;
 };
 
 const FOODS: FoodItem[] = [
-  { id: "biryani", name: "Chicken Biryani", desc: "Aromatic basmati rice with spicy chicken", image: biryani, defaultPrep: 30, tag: "Spicy" },
-  { id: "dosa", name: "Masala Dosa", desc: "Crispy South Indian crêpe with potato filling", image: dosa, defaultPrep: 15, tag: "Veg" },
-  { id: "paneer", name: "Paneer Butter Masala", desc: "Creamy tomato curry with soft paneer", image: paneer, defaultPrep: 25, tag: "Veg" },
-  { id: "friedrice", name: "Veg Fried Rice", desc: "Wok-tossed rice with crunchy vegetables", image: friedrice, defaultPrep: 20, tag: "Veg" },
-  { id: "pizza", name: "Cheese Burst Pizza", desc: "Stretchy mozzarella with fresh basil", image: pizza, defaultPrep: 20, tag: "Bestseller" },
-  { id: "burger", name: "Crispy Chicken Burger", desc: "Golden fried chicken with fresh lettuce", image: burger, defaultPrep: 15, tag: "New" },
+  { id: "biryani", name: "Chicken Biryani", image: biryani, price: 250, prep: 30, category: "Meals" },
+  { id: "dosa", name: "Masala Dosa", image: dosa, price: 120, prep: 15, category: "Meals" },
+  { id: "paneer", name: "Paneer Butter Masala", image: paneer, price: 220, prep: 25, category: "Meals" },
+  { id: "friedrice", name: "Veg Fried Rice", image: friedrice, price: 180, prep: 20, category: "Meals" },
+  { id: "pizza", name: "Pizza", image: pizza, price: 300, prep: 20, category: "Meals" },
+  { id: "burger", name: "Burger", image: burger, price: 150, prep: 15, category: "Meals" },
+  { id: "orange", name: "Orange Juice", image: orangeJuice, price: 80, prep: 5, category: "Juices" },
+  { id: "watermelon", name: "Watermelon Juice", image: watermelonJuice, price: 70, prep: 5, category: "Juices" },
+  { id: "mango", name: "Mango Juice", image: mangoJuice, price: 90, prep: 5, category: "Juices" },
 ];
+
+type ScheduledOrder = {
+  uid: string;
+  food: FoodItem;
+  delivery: Date;
+  startCook: Date;
+  outForDelivery: Date;
+};
 
 function pad(n: number) {
   return n.toString().padStart(2, "0");
@@ -57,47 +73,38 @@ function todayAt(hhmm: string): Date {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date();
   d.setHours(h, m, 0, 0);
-  // If chosen wall-clock time is more than 6h in the past, treat as next day.
   if (d.getTime() < Date.now() - 6 * 60 * 60 * 1000) d.setDate(d.getDate() + 1);
   return d;
 }
 function hhmmFromDate(d: Date) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-
-type Schedule = {
-  food: FoodItem;
-  prep: number;
-  startCook: Date;
-  outForDelivery: Date;
-  delivery: Date;
-};
+function rupees(n: number) {
+  return `₹${n.toLocaleString("en-IN")}`;
+}
 
 function Index() {
   const [selected, setSelected] = useState<FoodItem | null>(null);
   const [delivery, setDelivery] = useState<string>("");
-  const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [orders, setOrders] = useState<ScheduledOrder[]>([]);
   const [now, setNow] = useState<number>(() => Date.now());
   const [error, setError] = useState<string | null>(null);
 
-  // Tick every 30s so "earliest" hint stays fresh.
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(id);
   }, []);
 
-  const prep = selected?.defaultPrep ?? 0;
+  const prep = selected?.prep ?? 0;
   const minDeliveryDate = useMemo(
     () => (selected ? new Date(now + (prep + TRAVEL_MIN) * 60_000) : null),
     [selected, prep, now],
   );
   const minDeliveryHHMM = minDeliveryDate ? hhmmFromDate(minDeliveryDate) : "";
-
   const selectedDeliveryDate = useMemo(
     () => (delivery ? todayAt(delivery) : null),
     [delivery],
   );
-
   const isValid =
     !!selected &&
     !!selectedDeliveryDate &&
@@ -107,31 +114,52 @@ function Index() {
   function handleSelect(f: FoodItem) {
     setSelected(f);
     setError(null);
-    // Auto-fill delivery to the earliest valid slot for this dish.
-    const min = new Date(Date.now() + (f.defaultPrep + TRAVEL_MIN) * 60_000);
+    const min = new Date(Date.now() + (f.prep + TRAVEL_MIN) * 60_000);
     setDelivery(hhmmFromDate(min));
-    document.getElementById("schedule-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(
+      () =>
+        document
+          .getElementById("schedule-card")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+      50,
+    );
   }
 
-  function handleSchedule(e: React.FormEvent) {
+  function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     if (!selected || !selectedDeliveryDate || !minDeliveryDate) return;
     if (selectedDeliveryDate.getTime() < minDeliveryDate.getTime()) {
       setError(
-        `Please select a valid delivery time. Minimum time required is ${formatTime(minDeliveryDate)}.`,
+        `Invalid time. Earliest available is ${formatTime(minDeliveryDate)}.`,
       );
       return;
     }
-    const deliveryDate = selectedDeliveryDate;
-    const startCook = new Date(deliveryDate.getTime() - (prep + TRAVEL_MIN) * 60 * 1000);
-    const outForDelivery = new Date(deliveryDate.getTime() - TRAVEL_MIN * 60 * 1000);
-    setSchedule({ food: selected, prep, startCook, outForDelivery, delivery: deliveryDate });
-    setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 50);
+    const d = selectedDeliveryDate;
+    const order: ScheduledOrder = {
+      uid: `${selected.id}-${Date.now()}`,
+      food: selected,
+      delivery: d,
+      startCook: new Date(d.getTime() - (selected.prep + TRAVEL_MIN) * 60_000),
+      outForDelivery: new Date(d.getTime() - TRAVEL_MIN * 60_000),
+    };
+    setOrders((o) => [...o, order].sort((a, b) => a.delivery.getTime() - b.delivery.getTime()));
+    setSelected(null);
+    setDelivery("");
+    setError(null);
+    setTimeout(
+      () => document.getElementById("orders")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50,
+    );
   }
 
-  if (schedule) {
-    return <ResultDashboard schedule={schedule} onBack={() => setSchedule(null)} />;
+  function removeOrder(uid: string) {
+    setOrders((o) => o.filter((x) => x.uid !== uid));
   }
+
+  const total = orders.reduce((s, o) => s + o.food.price, 0);
+
+  const meals = FOODS.filter((f) => f.category === "Meals");
+  const juices = FOODS.filter((f) => f.category === "Juices");
 
   return (
     <div className="min-h-screen" style={{ background: "var(--gradient-bg)" }}>
@@ -145,81 +173,31 @@ function Index() {
             <UtensilsCrossed className="h-7 w-7" />
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-foreground sm:text-5xl">
-            Right-Time <span style={{ color: "var(--accent)" }}>Food Delivery</span>
+            Right-Time <span style={{ color: "var(--accent)" }}>Delivery</span>
           </h1>
           <p className="mx-auto mt-3 max-w-xl text-balance text-muted-foreground">
-            Pick your dish, set your delivery time. We'll start cooking at the perfect moment so it arrives hot and fresh.
+            Schedule multiple dishes — each at its own delivery time. We handle the timing.
           </p>
         </header>
 
-        {/* Food grid */}
-        <section className="mb-12">
-          <div className="mb-5 flex items-end justify-between">
-            <h2 className="text-xl font-bold text-foreground sm:text-2xl">What's on your mind?</h2>
-            <span className="text-sm text-muted-foreground">{FOODS.length} dishes</span>
-          </div>
+        {/* Meals */}
+        <FoodSection
+          title="Meals"
+          items={meals}
+          selectedId={selected?.id ?? null}
+          onSelect={handleSelect}
+        />
 
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {FOODS.map((f) => {
-              const active = selected?.id === f.id;
-              return (
-                <Card
-                  key={f.id}
-                  className="group relative overflow-hidden rounded-2xl border-0 p-0 transition-all duration-300 hover:-translate-y-1"
-                  style={{
-                    boxShadow: active ? "var(--shadow-primary)" : "var(--shadow-card)",
-                    outline: active ? "2px solid var(--primary)" : "none",
-                  }}
-                >
-                  <div className="relative aspect-[4/3] overflow-hidden">
-                    <img
-                      src={f.image}
-                      alt={f.name}
-                      loading="lazy"
-                      width={768}
-                      height={768}
-                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                    />
-                    <span
-                      className="absolute left-3 top-3 rounded-full px-2.5 py-1 text-xs font-semibold text-accent-foreground shadow"
-                      style={{ background: "var(--gradient-warm)" }}
-                    >
-                      {f.tag}
-                    </span>
-                    {active && (
-                      <span className="absolute right-3 top-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg">
-                        <Check className="h-4 w-4" />
-                      </span>
-                    )}
-                  </div>
-                  <div className="p-4">
-                    <h3 className="text-base font-bold text-foreground">{f.name}</h3>
-                    <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{f.desc}</p>
-                    <div className="mt-3 flex items-center justify-between">
-                      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="h-3.5 w-3.5" /> ~{f.defaultPrep} min
-                      </span>
-                      <Button
-                        size="sm"
-                        onClick={() => handleSelect(f)}
-                        className={
-                          active
-                            ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                            : "bg-foreground text-background hover:bg-foreground/90"
-                        }
-                      >
-                        {active ? "Selected" : "Select"}
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </section>
+        {/* Juices */}
+        <FoodSection
+          title="Juices"
+          items={juices}
+          selectedId={selected?.id ?? null}
+          onSelect={handleSelect}
+        />
 
         {/* Schedule card */}
-        <section id="schedule-card">
+        <section id="schedule-card" className="mb-12">
           <Card
             className="overflow-hidden rounded-2xl border-0 p-6 sm:p-8"
             style={{ boxShadow: "var(--shadow-card)" }}
@@ -232,14 +210,14 @@ function Index() {
                 <ChefHat className="h-5 w-5" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-foreground">Schedule your meal</h2>
+                <h2 className="text-xl font-bold text-foreground">Add to schedule</h2>
                 <p className="text-sm text-muted-foreground">
                   Travel time fixed at <span className="font-semibold text-foreground">{TRAVEL_MIN} min</span>
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handleSchedule} className="grid gap-5 sm:grid-cols-3">
+            <form onSubmit={handleAdd} className="grid gap-5 sm:grid-cols-3">
               <div className="sm:col-span-3">
                 <Label className="mb-2 block">Selected Food</Label>
                 <div
@@ -255,7 +233,9 @@ function Index() {
                       />
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-semibold text-foreground">{selected.name}</p>
-                        <p className="truncate text-xs text-muted-foreground">{selected.desc}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {rupees(selected.price)} · prep {selected.prep} min
+                        </p>
                       </div>
                     </>
                   ) : (
@@ -267,12 +247,10 @@ function Index() {
               </div>
 
               <div>
-                <Label className="mb-2 block">Preparation Time (auto)</Label>
+                <Label className="mb-2 block">Prep Time (auto)</Label>
                 <div
-                  aria-readonly="true"
                   className="flex h-11 items-center justify-between rounded-xl border bg-muted/40 px-3 text-sm text-foreground"
                   style={{ borderColor: "var(--border)" }}
-                  title="Set automatically by the chef based on the dish"
                 >
                   <span className="font-semibold tabular-nums">
                     {selected ? `${prep} min` : "—"}
@@ -297,7 +275,7 @@ function Index() {
                 />
                 {selected && minDeliveryDate && (
                   <p className="mt-1.5 text-xs text-muted-foreground">
-                    Earliest available:{" "}
+                    Earliest:{" "}
                     <span className="font-semibold text-foreground">
                       {formatTime(minDeliveryDate)}
                     </span>
@@ -322,7 +300,7 @@ function Index() {
                         color: "var(--primary)",
                       }}
                     >
-                      ✅ Perfect! Your food will arrive exactly on time.
+                      ✅ Perfect! Will arrive at {formatTime(selectedDeliveryDate!)}.
                     </div>
                   ) : (
                     <div
@@ -330,7 +308,7 @@ function Index() {
                       role="alert"
                     >
                       ⚠️ {error ??
-                        `Please select a valid delivery time. Minimum time required is ${
+                        `Earliest available is ${
                           minDeliveryDate ? formatTime(minDeliveryDate) : "—"
                         }.`}
                     </div>
@@ -346,254 +324,192 @@ function Index() {
                   className="h-14 w-full rounded-2xl text-base font-bold text-accent-foreground shadow-[var(--shadow-warm)] transition-transform hover:scale-[1.01] hover:opacity-95 disabled:opacity-50"
                   style={{ background: "var(--gradient-warm)" }}
                 >
-                  <Rocket className="mr-2 h-5 w-5" />
-                  Schedule Right-Time Delivery
+                  <Plus className="mr-2 h-5 w-5" />
+                  Add to Schedule
                 </Button>
               </div>
             </form>
           </Card>
         </section>
 
+        {/* Scheduled orders */}
+        <section id="orders" className="mb-10">
+          <div className="mb-5 flex items-end justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingBag className="h-5 w-5 text-foreground" />
+              <h2 className="text-xl font-bold text-foreground sm:text-2xl">Scheduled Orders</h2>
+            </div>
+            <span className="text-sm text-muted-foreground">{orders.length} item{orders.length === 1 ? "" : "s"}</span>
+          </div>
+
+          {orders.length === 0 ? (
+            <Card
+              className="rounded-2xl border-0 p-8 text-center text-muted-foreground"
+              style={{ boxShadow: "var(--shadow-card)" }}
+            >
+              No orders yet. Pick a dish and add it to your schedule.
+            </Card>
+          ) : (
+            <div className="grid gap-4">
+              {orders.map((o) => (
+                <Card
+                  key={o.uid}
+                  className="overflow-hidden rounded-2xl border-0 p-0"
+                  style={{ boxShadow: "var(--shadow-card)" }}
+                >
+                  <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+                    <img
+                      src={o.food.image}
+                      alt={o.food.name}
+                      loading="lazy"
+                      className="h-24 w-full rounded-xl object-cover sm:h-20 sm:w-20"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="truncate text-base font-bold text-foreground">
+                            {o.food.name}
+                          </h3>
+                          <p className="text-sm font-semibold" style={{ color: "var(--accent)" }}>
+                            {rupees(o.food.price)}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => removeOrder(o.uid)}
+                          aria-label="Remove order"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                        <TimeChip icon={<Flame className="h-3.5 w-3.5" />} label="Cook" time={formatTime(o.startCook)} />
+                        <TimeChip icon={<Bike className="h-3.5 w-3.5" />} label="Out" time={formatTime(o.outForDelivery)} />
+                        <TimeChip icon={<PackageCheck className="h-3.5 w-3.5" />} label="Deliver" time={formatTime(o.delivery)} highlight />
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+
+              {/* Total */}
+              <Card
+                className="flex items-center justify-between rounded-2xl border-0 p-5"
+                style={{ boxShadow: "var(--shadow-primary)", background: "var(--gradient-primary)" }}
+              >
+                <span className="text-base font-semibold text-primary-foreground">Total</span>
+                <span className="text-2xl font-extrabold text-primary-foreground">{rupees(total)}</span>
+              </Card>
+            </div>
+          )}
+        </section>
+
         <footer className="mt-10 text-center text-xs text-muted-foreground">
-          Smart scheduling: <code>Start Cooking = Delivery − (Prep + Travel)</code>
+          <code>Start Cooking = Delivery − (Prep + {TRAVEL_MIN}m Travel)</code>
         </footer>
       </main>
     </div>
   );
 }
 
-function ResultDashboard({ schedule, onBack }: { schedule: Schedule; onBack: () => void }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const countdown = useMemo(() => {
-    const diff = Math.max(0, schedule.delivery.getTime() - now);
-    const totalSec = Math.floor(diff / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    return { h, m, s, done: diff === 0 };
-  }, [schedule, now]);
-
-  const stage = useMemo(() => {
-    if (now < schedule.startCook.getTime()) return 0;
-    if (now < schedule.outForDelivery.getTime()) return 1;
-    if (now < schedule.delivery.getTime()) return 2;
-    return 3;
-  }, [schedule, now]);
-
-  const status = useMemo(() => {
-    if (stage === 0)
-      return { label: "Waiting to start cooking", dot: "var(--muted-foreground)" };
-    if (stage === 1) return { label: "Cooking started", dot: "var(--accent)" };
-    if (stage === 2) return { label: "Out for delivery", dot: "var(--primary)" };
-    return { label: "Delivered", dot: "var(--primary)" };
-  }, [stage]);
-
+function FoodSection({
+  title,
+  items,
+  selectedId,
+  onSelect,
+}: {
+  title: string;
+  items: FoodItem[];
+  selectedId: string | null;
+  onSelect: (f: FoodItem) => void;
+}) {
   return (
-    <div className="min-h-screen" style={{ background: "var(--gradient-bg)" }}>
-      <main className="mx-auto max-w-4xl px-4 py-8 sm:py-12">
-        <button
-          onClick={onBack}
-          className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back to menu
-        </button>
-
-        {/* Live status */}
-        <div
-          className="mb-4 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold shadow-sm"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <span
-            className="relative flex h-2.5 w-2.5"
-            aria-hidden="true"
-          >
-            <span
-              className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
-              style={{ background: status.dot }}
-            />
-            <span
-              className="relative inline-flex h-2.5 w-2.5 rounded-full"
-              style={{ background: status.dot }}
-            />
-          </span>
-          Live: {status.label}
-        </div>
-
-        {/* Hero summary card */}
-        <Card
-          className="overflow-hidden rounded-3xl border-0 p-0"
-          style={{ boxShadow: "var(--shadow-primary)" }}
-        >
-          <div className="grid sm:grid-cols-2">
-            <div className="relative aspect-[4/3] sm:aspect-auto">
-              <img
-                src={schedule.food.image}
-                alt={schedule.food.name}
-                width={768}
-                height={768}
-                className="absolute inset-0 h-full w-full object-cover"
-              />
-              <span
-                className="absolute left-4 top-4 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold text-accent-foreground shadow-lg"
-                style={{ background: "var(--gradient-warm)" }}
-              >
-                <Flame className="h-3.5 w-3.5" /> Scheduled
-              </span>
-            </div>
-            <div className="flex flex-col justify-center gap-4 p-6 sm:p-8">
-              <div>
-                <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Your order
-                </p>
-                <h1 className="mt-1 text-2xl font-extrabold text-foreground sm:text-3xl">
-                  {schedule.food.name}
-                </h1>
-                <p className="mt-1 text-sm text-muted-foreground">{schedule.food.desc}</p>
-              </div>
-              <div className="rounded-2xl bg-secondary/70 p-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Countdown to delivery
-                </p>
-                <p
-                  className="mt-1 text-4xl font-extrabold tabular-nums sm:text-5xl"
-                  style={{ color: "var(--primary)" }}
+    <section className="mb-12">
+      <div className="mb-5 flex items-end justify-between">
+        <h2 className="text-xl font-bold text-foreground sm:text-2xl">{title}</h2>
+        <span className="text-sm text-muted-foreground">{items.length} items</span>
+      </div>
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {items.map((f) => {
+          const active = selectedId === f.id;
+          return (
+            <Card
+              key={f.id}
+              className="group relative overflow-hidden rounded-2xl border-0 p-0 transition-all duration-300 hover:-translate-y-1"
+              style={{
+                boxShadow: active ? "var(--shadow-primary)" : "var(--shadow-card)",
+                outline: active ? "2px solid var(--primary)" : "none",
+              }}
+            >
+              <div className="relative aspect-[4/3] overflow-hidden">
+                <img
+                  src={f.image}
+                  alt={f.name}
+                  loading="lazy"
+                  width={768}
+                  height={768}
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+                <span
+                  className="absolute left-3 top-3 rounded-full px-2.5 py-1 text-xs font-bold text-accent-foreground shadow"
+                  style={{ background: "var(--gradient-warm)" }}
                 >
-                  {countdown.done
-                    ? "Delivered 🎉"
-                    : `${pad(countdown.h)}:${pad(countdown.m)}:${pad(countdown.s)}`}
-                </p>
+                  {rupees(f.price)}
+                </span>
               </div>
-            </div>
-          </div>
-        </Card>
-
-        {/* Time tiles */}
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
-          <TimeTile
-            label="Start cooking at"
-            value={formatTime(schedule.startCook)}
-            sub={`${schedule.prep} min prep`}
-            icon={<ChefHat className="h-5 w-5" />}
-            highlight
-          />
-          <TimeTile
-            label="Out for delivery"
-            value={formatTime(schedule.outForDelivery)}
-            sub={`${TRAVEL_MIN} min ride`}
-            icon={<Bike className="h-5 w-5" />}
-          />
-          <TimeTile
-            label="Delivery scheduled"
-            value={formatTime(schedule.delivery)}
-            sub="Hot & fresh"
-            icon={<PackageCheck className="h-5 w-5" />}
-          />
-        </div>
-
-        {/* Timeline */}
-        <Card
-          className="mt-6 rounded-2xl border-0 p-6 sm:p-8"
-          style={{ boxShadow: "var(--shadow-card)" }}
-        >
-          <h2 className="mb-6 text-lg font-bold text-foreground">Live progress</h2>
-          <Timeline stage={stage} />
-          <p className="mt-6 text-center text-sm font-semibold" style={{ color: "var(--accent)" }}>
-            ✓ Food will arrive hot and fresh
-          </p>
-        </Card>
-      </main>
-    </div>
+              <div className="p-4">
+                <h3 className="text-base font-bold text-foreground">{f.name}</h3>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" /> ~{f.prep} min
+                  </span>
+                  <Button
+                    size="sm"
+                    onClick={() => onSelect(f)}
+                    className={
+                      active
+                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                        : "bg-foreground text-background hover:bg-foreground/90"
+                    }
+                  >
+                    {active ? "Selected" : "Select"}
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
-function TimeTile({
-  label,
-  value,
-  sub,
+function TimeChip({
   icon,
-  highlight,
+  label,
+  time,
+  highlight = false,
 }: {
-  label: string;
-  value: string;
-  sub: string;
   icon: React.ReactNode;
+  label: string;
+  time: string;
   highlight?: boolean;
 }) {
   return (
-    <Card
-      className="rounded-2xl border-0 p-5"
+    <div
+      className="flex flex-col items-center justify-center rounded-lg border px-2 py-2"
       style={{
-        boxShadow: highlight ? "var(--shadow-warm)" : "var(--shadow-card)",
-        background: highlight ? "var(--gradient-warm)" : undefined,
+        borderColor: "var(--border)",
+        background: highlight ? "color-mix(in oklab, var(--primary) 10%, transparent)" : "var(--secondary)",
+        color: highlight ? "var(--primary)" : "var(--foreground)",
       }}
     >
-      <div
-        className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-wide ${
-          highlight ? "text-accent-foreground/90" : "text-muted-foreground"
-        }`}
-      >
-        {icon}
-        {label}
-      </div>
-      <p
-        className={`mt-2 text-3xl font-extrabold tabular-nums ${
-          highlight ? "text-accent-foreground" : "text-foreground"
-        }`}
-      >
-        {value}
-      </p>
-      <p
-        className={`mt-1 text-xs ${highlight ? "text-accent-foreground/80" : "text-muted-foreground"}`}
-      >
-        {sub}
-      </p>
-    </Card>
-  );
-}
-
-function Timeline({ stage }: { stage: number }) {
-  const steps = [
-    { label: "Cooking", icon: <ChefHat className="h-5 w-5" />, active: stage >= 1 },
-    { label: "Out for delivery", icon: <Bike className="h-5 w-5" />, active: stage >= 2 },
-    { label: "Delivered", icon: <PackageCheck className="h-5 w-5" />, active: stage >= 3 },
-  ];
-  const pct = stage === 0 ? 0 : stage === 1 ? 50 : stage === 2 ? 100 : 100;
-
-  return (
-    <div className="relative px-5">
-      <div className="absolute left-10 right-10 top-5 h-1 rounded-full bg-muted" />
-      <div
-        className="absolute left-10 top-5 h-1 rounded-full transition-all duration-700"
-        style={{ width: `calc((100% - 5rem) * ${pct / 100})`, background: "var(--gradient-primary)" }}
-      />
-      <ol className="relative grid grid-cols-3 gap-2">
-        {steps.map((s) => (
-          <li key={s.label} className="flex flex-col items-center text-center">
-            <div
-              className={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all ${
-                s.active
-                  ? "border-transparent text-primary-foreground shadow-[var(--shadow-primary)]"
-                  : "border-border bg-background text-muted-foreground"
-              }`}
-              style={s.active ? { background: "var(--gradient-primary)" } : undefined}
-            >
-              {s.icon}
-            </div>
-            <span
-              className={`mt-2 text-xs font-semibold sm:text-sm ${
-                s.active ? "text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              {s.label}
-            </span>
-          </li>
-        ))}
-      </ol>
+      <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide opacity-80">
+        {icon} {label}
+      </span>
+      <span className="mt-0.5 text-sm font-bold tabular-nums">{time}</span>
     </div>
   );
 }
