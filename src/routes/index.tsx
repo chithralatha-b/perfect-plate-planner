@@ -39,12 +39,12 @@ type FoodItem = {
 };
 
 const FOODS: FoodItem[] = [
-  { id: "biryani", name: "Chicken Biryani", desc: "Aromatic basmati rice with spicy chicken", image: biryani, defaultPrep: 35, tag: "Spicy" },
+  { id: "biryani", name: "Chicken Biryani", desc: "Aromatic basmati rice with spicy chicken", image: biryani, defaultPrep: 30, tag: "Spicy" },
   { id: "dosa", name: "Masala Dosa", desc: "Crispy South Indian crêpe with potato filling", image: dosa, defaultPrep: 15, tag: "Veg" },
   { id: "paneer", name: "Paneer Butter Masala", desc: "Creamy tomato curry with soft paneer", image: paneer, defaultPrep: 25, tag: "Veg" },
-  { id: "friedrice", name: "Veg Fried Rice", desc: "Wok-tossed rice with crunchy vegetables", image: friedrice, defaultPrep: 18, tag: "Veg" },
-  { id: "pizza", name: "Cheese Burst Pizza", desc: "Stretchy mozzarella with fresh basil", image: pizza, defaultPrep: 22, tag: "Bestseller" },
-  { id: "burger", name: "Crispy Chicken Burger", desc: "Golden fried chicken with fresh lettuce", image: burger, defaultPrep: 20, tag: "New" },
+  { id: "friedrice", name: "Veg Fried Rice", desc: "Wok-tossed rice with crunchy vegetables", image: friedrice, defaultPrep: 20, tag: "Veg" },
+  { id: "pizza", name: "Cheese Burst Pizza", desc: "Stretchy mozzarella with fresh basil", image: pizza, defaultPrep: 20, tag: "Bestseller" },
+  { id: "burger", name: "Crispy Chicken Burger", desc: "Golden fried chicken with fresh lettuce", image: burger, defaultPrep: 15, tag: "New" },
 ];
 
 function pad(n: number) {
@@ -57,11 +57,11 @@ function todayAt(hhmm: string): Date {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date();
   d.setHours(h, m, 0, 0);
-  if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+  // If chosen wall-clock time is more than 6h in the past, treat as next day.
+  if (d.getTime() < Date.now() - 6 * 60 * 60 * 1000) d.setDate(d.getDate() + 1);
   return d;
 }
-function defaultDeliveryHHMM() {
-  const d = new Date(Date.now() + 60 * 60 * 1000);
+function hhmmFromDate(d: Date) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
@@ -75,20 +75,54 @@ type Schedule = {
 
 function Index() {
   const [selected, setSelected] = useState<FoodItem | null>(null);
-  const [prep, setPrep] = useState<number>(20);
-  const [delivery, setDelivery] = useState<string>(defaultDeliveryHHMM());
+  const [delivery, setDelivery] = useState<string>("");
   const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [now, setNow] = useState<number>(() => Date.now());
+  const [error, setError] = useState<string | null>(null);
+
+  // Tick every 30s so "earliest" hint stays fresh.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const prep = selected?.defaultPrep ?? 0;
+  const minDeliveryDate = useMemo(
+    () => (selected ? new Date(now + (prep + TRAVEL_MIN) * 60_000) : null),
+    [selected, prep, now],
+  );
+  const minDeliveryHHMM = minDeliveryDate ? hhmmFromDate(minDeliveryDate) : "";
+
+  const selectedDeliveryDate = useMemo(
+    () => (delivery ? todayAt(delivery) : null),
+    [delivery],
+  );
+
+  const isValid =
+    !!selected &&
+    !!selectedDeliveryDate &&
+    !!minDeliveryDate &&
+    selectedDeliveryDate.getTime() >= minDeliveryDate.getTime();
 
   function handleSelect(f: FoodItem) {
     setSelected(f);
-    setPrep(f.defaultPrep);
+    setError(null);
+    // Auto-fill delivery to the earliest valid slot for this dish.
+    const min = new Date(Date.now() + (f.defaultPrep + TRAVEL_MIN) * 60_000);
+    setDelivery(hhmmFromDate(min));
     document.getElementById("schedule-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function handleSchedule(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected) return;
-    const deliveryDate = todayAt(delivery);
+    if (!selected || !selectedDeliveryDate || !minDeliveryDate) return;
+    if (selectedDeliveryDate.getTime() < minDeliveryDate.getTime()) {
+      setError(
+        `Please select a valid delivery time. Minimum time required is ${formatTime(minDeliveryDate)}.`,
+      );
+      return;
+    }
+    const deliveryDate = selectedDeliveryDate;
     const startCook = new Date(deliveryDate.getTime() - (prep + TRAVEL_MIN) * 60 * 1000);
     const outForDelivery = new Date(deliveryDate.getTime() - TRAVEL_MIN * 60 * 1000);
     setSchedule({ food: selected, prep, startCook, outForDelivery, delivery: deliveryDate });
