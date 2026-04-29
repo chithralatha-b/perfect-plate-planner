@@ -39,12 +39,12 @@ type FoodItem = {
 };
 
 const FOODS: FoodItem[] = [
-  { id: "biryani", name: "Chicken Biryani", desc: "Aromatic basmati rice with spicy chicken", image: biryani, defaultPrep: 35, tag: "Spicy" },
+  { id: "biryani", name: "Chicken Biryani", desc: "Aromatic basmati rice with spicy chicken", image: biryani, defaultPrep: 30, tag: "Spicy" },
   { id: "dosa", name: "Masala Dosa", desc: "Crispy South Indian crêpe with potato filling", image: dosa, defaultPrep: 15, tag: "Veg" },
   { id: "paneer", name: "Paneer Butter Masala", desc: "Creamy tomato curry with soft paneer", image: paneer, defaultPrep: 25, tag: "Veg" },
-  { id: "friedrice", name: "Veg Fried Rice", desc: "Wok-tossed rice with crunchy vegetables", image: friedrice, defaultPrep: 18, tag: "Veg" },
-  { id: "pizza", name: "Cheese Burst Pizza", desc: "Stretchy mozzarella with fresh basil", image: pizza, defaultPrep: 22, tag: "Bestseller" },
-  { id: "burger", name: "Crispy Chicken Burger", desc: "Golden fried chicken with fresh lettuce", image: burger, defaultPrep: 20, tag: "New" },
+  { id: "friedrice", name: "Veg Fried Rice", desc: "Wok-tossed rice with crunchy vegetables", image: friedrice, defaultPrep: 20, tag: "Veg" },
+  { id: "pizza", name: "Cheese Burst Pizza", desc: "Stretchy mozzarella with fresh basil", image: pizza, defaultPrep: 20, tag: "Bestseller" },
+  { id: "burger", name: "Crispy Chicken Burger", desc: "Golden fried chicken with fresh lettuce", image: burger, defaultPrep: 15, tag: "New" },
 ];
 
 function pad(n: number) {
@@ -57,11 +57,11 @@ function todayAt(hhmm: string): Date {
   const [h, m] = hhmm.split(":").map(Number);
   const d = new Date();
   d.setHours(h, m, 0, 0);
-  if (d.getTime() < Date.now()) d.setDate(d.getDate() + 1);
+  // If chosen wall-clock time is more than 6h in the past, treat as next day.
+  if (d.getTime() < Date.now() - 6 * 60 * 60 * 1000) d.setDate(d.getDate() + 1);
   return d;
 }
-function defaultDeliveryHHMM() {
-  const d = new Date(Date.now() + 60 * 60 * 1000);
+function hhmmFromDate(d: Date) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
@@ -75,20 +75,54 @@ type Schedule = {
 
 function Index() {
   const [selected, setSelected] = useState<FoodItem | null>(null);
-  const [prep, setPrep] = useState<number>(20);
-  const [delivery, setDelivery] = useState<string>(defaultDeliveryHHMM());
+  const [delivery, setDelivery] = useState<string>("");
   const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [now, setNow] = useState<number>(() => Date.now());
+  const [error, setError] = useState<string | null>(null);
+
+  // Tick every 30s so "earliest" hint stays fresh.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const prep = selected?.defaultPrep ?? 0;
+  const minDeliveryDate = useMemo(
+    () => (selected ? new Date(now + (prep + TRAVEL_MIN) * 60_000) : null),
+    [selected, prep, now],
+  );
+  const minDeliveryHHMM = minDeliveryDate ? hhmmFromDate(minDeliveryDate) : "";
+
+  const selectedDeliveryDate = useMemo(
+    () => (delivery ? todayAt(delivery) : null),
+    [delivery],
+  );
+
+  const isValid =
+    !!selected &&
+    !!selectedDeliveryDate &&
+    !!minDeliveryDate &&
+    selectedDeliveryDate.getTime() >= minDeliveryDate.getTime();
 
   function handleSelect(f: FoodItem) {
     setSelected(f);
-    setPrep(f.defaultPrep);
+    setError(null);
+    // Auto-fill delivery to the earliest valid slot for this dish.
+    const min = new Date(Date.now() + (f.defaultPrep + TRAVEL_MIN) * 60_000);
+    setDelivery(hhmmFromDate(min));
     document.getElementById("schedule-card")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function handleSchedule(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected) return;
-    const deliveryDate = todayAt(delivery);
+    if (!selected || !selectedDeliveryDate || !minDeliveryDate) return;
+    if (selectedDeliveryDate.getTime() < minDeliveryDate.getTime()) {
+      setError(
+        `Please select a valid delivery time. Minimum time required is ${formatTime(minDeliveryDate)}.`,
+      );
+      return;
+    }
+    const deliveryDate = selectedDeliveryDate;
     const startCook = new Date(deliveryDate.getTime() - (prep + TRAVEL_MIN) * 60 * 1000);
     const outForDelivery = new Date(deliveryDate.getTime() - TRAVEL_MIN * 60 * 1000);
     setSchedule({ food: selected, prep, startCook, outForDelivery, delivery: deliveryDate });
@@ -233,16 +267,18 @@ function Index() {
               </div>
 
               <div>
-                <Label htmlFor="prep" className="mb-2 block">Preparation Time (min)</Label>
-                <Input
-                  id="prep"
-                  type="number"
-                  min={1}
-                  value={prep}
-                  onChange={(e) => setPrep(Number(e.target.value))}
-                  className="h-11 rounded-xl"
-                  required
-                />
+                <Label className="mb-2 block">Preparation Time (auto)</Label>
+                <div
+                  aria-readonly="true"
+                  className="flex h-11 items-center justify-between rounded-xl border bg-muted/40 px-3 text-sm text-foreground"
+                  style={{ borderColor: "var(--border)" }}
+                  title="Set automatically by the chef based on the dish"
+                >
+                  <span className="font-semibold tabular-nums">
+                    {selected ? `${prep} min` : "—"}
+                  </span>
+                  <span className="text-xs text-muted-foreground">locked</span>
+                </div>
               </div>
               <div>
                 <Label htmlFor="delivery" className="mb-2 block">Delivery Time</Label>
@@ -250,10 +286,23 @@ function Index() {
                   id="delivery"
                   type="time"
                   value={delivery}
-                  onChange={(e) => setDelivery(e.target.value)}
+                  min={minDeliveryHHMM || undefined}
+                  onChange={(e) => {
+                    setDelivery(e.target.value);
+                    setError(null);
+                  }}
+                  disabled={!selected}
                   className="h-11 rounded-xl"
                   required
                 />
+                {selected && minDeliveryDate && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Earliest available:{" "}
+                    <span className="font-semibold text-foreground">
+                      {formatTime(minDeliveryDate)}
+                    </span>
+                  </p>
+                )}
               </div>
               <div className="flex items-end">
                 <div className="w-full rounded-xl bg-secondary/60 p-3 text-center">
@@ -262,10 +311,37 @@ function Index() {
                 </div>
               </div>
 
+              {selected && delivery && (
+                <div className="sm:col-span-3">
+                  {isValid ? (
+                    <div
+                      className="rounded-xl border px-4 py-3 text-sm font-semibold"
+                      style={{
+                        borderColor: "color-mix(in oklab, var(--primary) 40%, transparent)",
+                        background: "color-mix(in oklab, var(--primary) 10%, transparent)",
+                        color: "var(--primary)",
+                      }}
+                    >
+                      ✅ Perfect! Your food will arrive exactly on time.
+                    </div>
+                  ) : (
+                    <div
+                      className="rounded-xl border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-semibold text-destructive"
+                      role="alert"
+                    >
+                      ⚠️ {error ??
+                        `Please select a valid delivery time. Minimum time required is ${
+                          minDeliveryDate ? formatTime(minDeliveryDate) : "—"
+                        }.`}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="sm:col-span-3">
                 <Button
                   type="submit"
-                  disabled={!selected}
+                  disabled={!selected || !isValid}
                   size="lg"
                   className="h-14 w-full rounded-2xl text-base font-bold text-accent-foreground shadow-[var(--shadow-warm)] transition-transform hover:scale-[1.01] hover:opacity-95 disabled:opacity-50"
                   style={{ background: "var(--gradient-warm)" }}
@@ -309,6 +385,14 @@ function ResultDashboard({ schedule, onBack }: { schedule: Schedule; onBack: () 
     return 3;
   }, [schedule, now]);
 
+  const status = useMemo(() => {
+    if (stage === 0)
+      return { label: "Waiting to start cooking", dot: "var(--muted-foreground)" };
+    if (stage === 1) return { label: "Cooking started", dot: "var(--accent)" };
+    if (stage === 2) return { label: "Out for delivery", dot: "var(--primary)" };
+    return { label: "Delivered", dot: "var(--primary)" };
+  }, [stage]);
+
   return (
     <div className="min-h-screen" style={{ background: "var(--gradient-bg)" }}>
       <main className="mx-auto max-w-4xl px-4 py-8 sm:py-12">
@@ -318,6 +402,27 @@ function ResultDashboard({ schedule, onBack }: { schedule: Schedule; onBack: () 
         >
           <ArrowLeft className="h-4 w-4" /> Back to menu
         </button>
+
+        {/* Live status */}
+        <div
+          className="mb-4 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold shadow-sm"
+          style={{ borderColor: "var(--border)" }}
+        >
+          <span
+            className="relative flex h-2.5 w-2.5"
+            aria-hidden="true"
+          >
+            <span
+              className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+              style={{ background: status.dot }}
+            />
+            <span
+              className="relative inline-flex h-2.5 w-2.5 rounded-full"
+              style={{ background: status.dot }}
+            />
+          </span>
+          Live: {status.label}
+        </div>
 
         {/* Hero summary card */}
         <Card
