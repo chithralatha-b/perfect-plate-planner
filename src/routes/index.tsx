@@ -385,6 +385,14 @@ function ResultDashboard({ schedule, onBack }: { schedule: Schedule; onBack: () 
     return 3;
   }, [schedule, now]);
 
+  const status = useMemo(() => {
+    if (stage === 0)
+      return { label: "Waiting to start cooking", dot: "var(--muted-foreground)" };
+    if (stage === 1) return { label: "Cooking started", dot: "var(--accent)" };
+    if (stage === 2) return { label: "Out for delivery", dot: "var(--primary)" };
+    return { label: "Delivered", dot: "var(--primary)" };
+  }, [stage]);
+
   return (
     <div className="min-h-screen" style={{ background: "var(--gradient-bg)" }}>
       <main className="mx-auto max-w-4xl px-4 py-8 sm:py-12">
@@ -394,6 +402,27 @@ function ResultDashboard({ schedule, onBack }: { schedule: Schedule; onBack: () 
         >
           <ArrowLeft className="h-4 w-4" /> Back to menu
         </button>
+
+        {/* Live status */}
+        <div
+          className="mb-4 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm font-semibold shadow-sm"
+          style={{ borderColor: "var(--border)" }}
+        >
+          <span
+            className="relative flex h-2.5 w-2.5"
+            aria-hidden="true"
+          >
+            <span
+              className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+              style={{ background: status.dot }}
+            />
+            <span
+              className="relative inline-flex h-2.5 w-2.5 rounded-full"
+              style={{ background: status.dot }}
+            />
+          </span>
+          Live: {status.label}
+        </div>
 
         {/* Hero summary card */}
         <Card
