@@ -267,16 +267,18 @@ function Index() {
               </div>
 
               <div>
-                <Label htmlFor="prep" className="mb-2 block">Preparation Time (min)</Label>
-                <Input
-                  id="prep"
-                  type="number"
-                  min={1}
-                  value={prep}
-                  onChange={(e) => setPrep(Number(e.target.value))}
-                  className="h-11 rounded-xl"
-                  required
-                />
+                <Label className="mb-2 block">Preparation Time (auto)</Label>
+                <div
+                  aria-readonly="true"
+                  className="flex h-11 items-center justify-between rounded-xl border bg-muted/40 px-3 text-sm text-foreground"
+                  style={{ borderColor: "var(--border)" }}
+                  title="Set automatically by the chef based on the dish"
+                >
+                  <span className="font-semibold tabular-nums">
+                    {selected ? `${prep} min` : "—"}
+                  </span>
+                  <span className="text-xs text-muted-foreground">locked</span>
+                </div>
               </div>
               <div>
                 <Label htmlFor="delivery" className="mb-2 block">Delivery Time</Label>
@@ -284,10 +286,23 @@ function Index() {
                   id="delivery"
                   type="time"
                   value={delivery}
-                  onChange={(e) => setDelivery(e.target.value)}
+                  min={minDeliveryHHMM || undefined}
+                  onChange={(e) => {
+                    setDelivery(e.target.value);
+                    setError(null);
+                  }}
+                  disabled={!selected}
                   className="h-11 rounded-xl"
                   required
                 />
+                {selected && minDeliveryDate && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Earliest available:{" "}
+                    <span className="font-semibold text-foreground">
+                      {formatTime(minDeliveryDate)}
+                    </span>
+                  </p>
+                )}
               </div>
               <div className="flex items-end">
                 <div className="w-full rounded-xl bg-secondary/60 p-3 text-center">
@@ -296,10 +311,37 @@ function Index() {
                 </div>
               </div>
 
+              {selected && delivery && (
+                <div className="sm:col-span-3">
+                  {isValid ? (
+                    <div
+                      className="rounded-xl border px-4 py-3 text-sm font-semibold"
+                      style={{
+                        borderColor: "color-mix(in oklab, var(--primary) 40%, transparent)",
+                        background: "color-mix(in oklab, var(--primary) 10%, transparent)",
+                        color: "var(--primary)",
+                      }}
+                    >
+                      ✅ Perfect! Your food will arrive exactly on time.
+                    </div>
+                  ) : (
+                    <div
+                      className="rounded-xl border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm font-semibold text-destructive"
+                      role="alert"
+                    >
+                      ⚠️ {error ??
+                        `Please select a valid delivery time. Minimum time required is ${
+                          minDeliveryDate ? formatTime(minDeliveryDate) : "—"
+                        }.`}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="sm:col-span-3">
                 <Button
                   type="submit"
-                  disabled={!selected}
+                  disabled={!selected || !isValid}
                   size="lg"
                   className="h-14 w-full rounded-2xl text-base font-bold text-accent-foreground shadow-[var(--shadow-warm)] transition-transform hover:scale-[1.01] hover:opacity-95 disabled:opacity-50"
                   style={{ background: "var(--gradient-warm)" }}
